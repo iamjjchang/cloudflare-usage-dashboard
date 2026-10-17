@@ -20,6 +20,7 @@ import { attachCapKeys, ConfigError, DEFAULT_CONFIG, loadAlertState, loadConfig,
 import { ApiError, detectAccountId, listZones, type Api, type Zone } from "./cloudflare";
 import { buildSections, type Section } from "./usage";
 import { buildZeroTrust } from "./zerotrust";
+import { buildZtInventory } from "./ztinventory";
 import { zoneDetail } from "./zone";
 
 /** CAPS is optional until the KV namespace is created (see README). */
@@ -153,12 +154,13 @@ async function handleZeroTrust(_request: Request, url: URL, env: AppEnv, ctx: Ex
 	const api = await apiFor(env);
 	if (!api) return json({ error: "CF_API_TOKEN secret is not set" }, 500);
 
-	return cached(`zerotrust?from=${from}&to=${to}`, url, to, ctx, async () => ({
+	return cached(`zerotrust-v2?from=${from}&to=${to}`, url, to, ctx, async () => ({
 		accountId: api.accountId,
 		range: { from, to, days: daysBetween(from, to), timezone: "UTC" },
 		zones: [],
 		generatedAt: new Date().toISOString(),
-		sections: await buildZeroTrust(api, { from, to }),
+		// Inventory (REST, current state) first, then analytics for the selected dates.
+		sections: (await Promise.all([buildZtInventory(api, { from, to }), buildZeroTrust(api, { from, to })])).flat(),
 	}));
 }
 

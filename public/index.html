@@ -545,7 +545,10 @@
   }
 
   function card(s) {
-    const notes = s.notes.length ? `<ul class="notes">${s.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
+    const warn = s.notes.filter((n) => n.startsWith("⚠"));
+    const plain = s.notes.filter((n) => !n.startsWith("⚠"));
+    const notes = (warn.length ? `<div class="callout"><b>${warn.map((n) => esc(n)).join("<br>")}</b></div>` : "") +
+      (plain.length ? `<ul class="notes">${plain.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : "");
     const tables = s.tables.map((t, i) => {
       const open = s.id === "cdn" || s.id === "good-requests" || s.id === "dns" || s.id === "spectrum" || (t.rows.length > 0 && t.rows.length <= 6 && i === 0);
       const hint = t.rows.some((r) => r.zoneId) ? ` <span class="badge">click a zone for detail</span>` : "";
@@ -852,7 +855,7 @@
   }
 
   function renderZt(d, cacheState) {
-    const products = d.sections.filter((x) => x.id !== "zt-other");
+    const products = d.sections.filter((x) => x.id !== "zt-other" && !x.id.startsWith("zt-inv-"));
     const active = products.filter((x) => !x.notes.includes("No activity in this date range."));
     statusLine(d, cacheState, `<span>Zero Trust: <b>${active.length} of ${products.length}</b> products with activity</span>`);
     const groups = [...new Set(d.sections.map((x) => x.group))];
@@ -867,7 +870,7 @@
           ${live.length ? `<div class="grid">${live.map(card).join("")}</div>` : ""}
           ${idle.length ? `<p class="muted" style="margin:${live.length ? "10px" : "0"} 0 0">No activity in this range: ${idle.map((x) => esc(x.title)).join(" · ")}</p>` : ""}`;
       }).join("")}
-      <ul class="notes"><li>Daily rollups (Access, Gateway, Shadow IT, MCP) are exact and keep a year of history. WARP, Tunnel, Browser Isolation and other sampled datasets keep about a month.</li></ul>`;
+      <ul class="notes"><li>Seats &amp; inventory show the account as it is now (refreshed hourly; use Refresh for the latest). Daily rollups (Access, Gateway, Shadow IT, MCP) are exact and keep a year of history. WARP, Tunnel, Browser Isolation and other sampled datasets keep about a month.</li></ul>`;
     $("ztBack").onclick = (e) => { e.preventDefault(); state.page = null; load(false, true); };
   }
 

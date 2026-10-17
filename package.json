@@ -28,7 +28,7 @@
   "cloudflare": {
     "bindings": {
       "CF_API_TOKEN": {
-        "description": "Cloudflare API token for reading analytics. Permissions: Account Analytics Read, Zone Analytics Read and Zone Read (all zones). Optional: Zone Settings Read for Spectrum IPv4 counts."
+        "description": "Cloudflare API token for reading analytics. Permissions: Account Analytics Read, Zone Analytics Read and Zone Read (all zones). Optional: Zone Settings Read for Spectrum IPv4 counts; Access: Users, Access: Apps and Policies, Zero Trust, Cloudflare Tunnel and Billing Read for the Zero Trust seats & inventory cards."
       },
       "DASHBOARD_PASSWORD": {
         "description": "Password for the dashboard (HTTP Basic auth, any username). Use a long random string."

@@ -6,6 +6,8 @@
 #   Zone > Analytics > Read          (all zones)
 #   Zone > Zone > Read               (all zones)
 # Optional: Zone > Zone Settings > Read (Spectrum IPv4 / app counts)
+# Optional (Zero Trust seats & inventory): Account > Access: Users, Access: Apps and Policies,
+#   Zero Trust, Cloudflare Tunnel and Billing > Read
 CF_API_TOKEN=
 
 # Password for the dashboard (HTTP Basic auth; any username works).

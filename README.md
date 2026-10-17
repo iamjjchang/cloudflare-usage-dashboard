@@ -37,7 +37,16 @@ with a read-only API token. Nothing leaves your account except the alerts you co
 - DNS: query types, response codes, top query names, protocol & IP version, cached answers, top data centers
 - Daily table and CSV export
 
-**Zero Trust page** – every Cloudflare One analytics dataset for the selected dates:
+**Zero Trust page** – starts with **Seats & inventory** (current state, from the REST API):
+
+- Seats in use vs purchased (from your Zero Trust subscription), Access and Gateway seats, users who logged in
+- WARP devices by OS and client version, last seen, devices online now (DEX live fleet)
+- Cloudflare Tunnel health and connections, with a warning when a tunnel is down
+- Private network routes and virtual networks
+- Configuration counts: Access apps, IdPs, groups, service tokens, posture rules, Gateway policies
+  (by action and traffic type), locations, lists, DLP profiles, DEX tests
+
+Then every Cloudflare One analytics dataset for the selected dates:
 
 | Area | What you see | Datasets |
 |---|---|---|
@@ -111,6 +120,13 @@ account-owned token under **Manage Account → Account API Tokens**) with:
 | Zone → **Analytics** → Read (all zones) | CDN, Bot Management, DNS |
 | Zone → **Zone** → Read (all zones) | Listing zones |
 | Zone → **Zone Settings** → Read *(optional)* | Spectrum IPv4 / app counts |
+| Account → **Access: Users** → Read *(optional)* | Zero Trust seats in use |
+| Account → **Billing** → Read *(optional)* | Seats purchased (Zero Trust subscription) |
+| Account → **Zero Trust** → Read *(optional)* | Devices, Gateway policies/locations/lists, DLP, DEX |
+| Account → **Access: Apps and Policies** → Read *(optional)* | Access apps, IdPs, groups, service tokens |
+| Account → **Cloudflare Tunnel** → Read *(optional)* | Tunnel health, private network routes |
+
+Optional permissions only add the matching cards; anything missing shows a note naming the permission.
 
 This token is only read by the Worker. It is **not** the token used to deploy.
 
@@ -194,7 +210,8 @@ Every GraphQL query the dashboard uses is documented in [docs/graphql-queries.md
 src/index.ts       routing, password check, caching, cron handler
 src/usage.ts       one section per product (account overview)
 src/zone.ts        zone drill-down
-src/zerotrust.ts   Zero Trust (Cloudflare One) page
+src/zerotrust.ts   Zero Trust (Cloudflare One) analytics
+src/ztinventory.ts Zero Trust seats & inventory (REST)
 src/caps.ts        caps, thresholds, alert delivery (webhook / ntfy)
 src/cloudflare.ts  GraphQL + REST clients, range splitting, retention fallback
 public/index.html  the dashboard UI (no build step, no dependencies)
