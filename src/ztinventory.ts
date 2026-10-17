@@ -7,40 +7,8 @@
  * Zero Trust, Cloudflare Tunnel, Billing). Missing ones show as a note, not a failure.
  */
 
-import { isLastPage, rest, type Api, type DateRange } from "./cloudflare";
+import { restList as list, restOne as one, type Api, type DateRange, type Obj } from "./cloudflare";
 import type { Metric, Section, Table, Unit } from "./usage";
-
-type Obj = Record<string, unknown>;
-
-/** GET a list endpoint, following pages. Returns null when the token lacks permission. */
-async function list(api: Api, path: string, perPage = 50): Promise<Obj[] | null> {
-	const items: Obj[] = [];
-	for (let page = 1; ; page++) {
-		const sep = path.includes("?") ? "&" : "?";
-		let body;
-		try {
-			body = await rest<unknown>(api, `${path}${sep}per_page=${perPage}&page=${page}`);
-		} catch (err) {
-			if (/HTTP 403/.test(String(err))) return null;
-			throw err;
-		}
-		const result = body.result;
-		// Some endpoints wrap the list (e.g. DEX tests: { dex_tests: [...] }).
-		const arr = Array.isArray(result) ? result : Object.values((result ?? {}) as Obj).find(Array.isArray) ?? [];
-		items.push(...(arr as Obj[]));
-		if (isLastPage({ ...body, result: arr }, page, perPage)) break;
-	}
-	return items;
-}
-
-async function one(api: Api, path: string): Promise<Obj | null> {
-	try {
-		return (await rest<Obj>(api, path)).result ?? null;
-	} catch (err) {
-		if (/HTTP 403/.test(String(err))) return null;
-		throw err;
-	}
-}
 
 /** Runs a fetch, turning unexpected errors into a message so one failure doesn't hide the rest. */
 async function safe<T>(fn: () => Promise<T>, errors: string[], what: string): Promise<T | null> {

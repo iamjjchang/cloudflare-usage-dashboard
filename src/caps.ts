@@ -16,6 +16,8 @@ const CAPPABLE: Record<string, string> = {
 	"cdn|CDN data transfer": "cdn.bytes",
 	"good-requests|Good requests": "bot.goodRequests",
 	"dns|DNS queries": "dns.queries",
+	"zone-config|Custom hostnames": "zones.customHostnames",
+	"zone-config|Load balancers": "zones.loadBalancers",
 	"spectrum|IPv4 addresses": "spectrum.ipv4",
 	"spectrum|Data transfer (in + out)": "spectrum.bytes",
 	"spectrum|Concurrent connections now": "spectrum.concurrent",

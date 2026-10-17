@@ -28,8 +28,15 @@ with a read-only API token. Nothing leaves your account except the alerts you co
 | Workflows | Instances, steps, CPU, duration | `workflowsAdaptiveGroups` |
 | Pages Functions | Requests, errors, duration | `pagesFunctionsInvocationsAdaptiveGroups` |
 | R2 | Class A / B operations, storage by class, bandwidth | `r2*AdaptiveGroups` |
+| Zone configuration (per zone) | Custom hostnames, load balancers, health checks, DNS records | REST (current counts) |
 
 **Zone drill-down** – click any zone name for that zone's detail:
+
+- **Zone configuration** (REST, current state): plan and setup, SSL/TLS mode, minimum TLS, security
+  level and other key settings, DNSSEC; DNS records by type; certificate packs and the next ones to
+  expire; rule counts per ruleset phase (WAF custom, rate limiting, cache, redirects…); load
+  balancers; health checks; custom hostnames; Workers routes; Email Routing — with warnings for
+  unhealthy health checks and certificates expiring within 14 days
 
 - Daily charts: requests per day (good vs threats), data transfer per day, DNS queries per day
 - CDN: top countries, status codes, content types (exact); cache status, top hostnames, top paths, device types (sampled)
@@ -64,7 +71,7 @@ Products with no activity in the range collapse into a single line, so the page 
 **Date picker** – presets (last 7/14/30/90 days, this month, last month…) plus a calendar: click a
 start date, then an end date. Works the same on every page.
 
-**Caps & alerts** – set a monthly cap for any of 35 billable metrics and two thresholds with
+**Caps & alerts** – set a monthly cap for any of 37 billable metrics (including custom hostnames and load balancers) and two thresholds with
 sliders (default: warning 80%, critical 90%).
 
 - The overview shows a progress bar under each capped metric and a banner when any is close.
@@ -119,7 +126,8 @@ account-owned token under **Manage Account → Account API Tokens**) with:
 | Account → **Account Analytics** → Read | Workers, KV, D1, R2, Durable Objects, Images, etc. |
 | Zone → **Analytics** → Read (all zones) | CDN, Bot Management, DNS |
 | Zone → **Zone** → Read (all zones) | Listing zones |
-| Zone → **Zone Settings** → Read *(optional)* | Spectrum IPv4 / app counts |
+| Zone → **Zone Settings** → Read *(optional)* | Spectrum IPv4 / app counts, zone settings |
+| Zone → **DNS**, **SSL and Certificates**, **Load Balancers**, **Health Checks**, **Workers Routes**, **Email Routing Rules**, **Zone WAF** / rulesets → Read *(optional)* | Zone configuration card |
 | Account → **Access: Users** → Read *(optional)* | Zero Trust seats in use |
 | Account → **Billing** → Read *(optional)* | Seats purchased (Zero Trust subscription) |
 | Account → **Zero Trust** → Read *(optional)* | Devices, Gateway policies/locations/lists, DLP, DEX |
@@ -210,6 +218,7 @@ Every GraphQL query the dashboard uses is documented in [docs/graphql-queries.md
 src/index.ts       routing, password check, caching, cron handler
 src/usage.ts       one section per product (account overview)
 src/zone.ts        zone drill-down
+src/zoneconfig.ts  zone configuration (REST) and overview totals
 src/zerotrust.ts   Zero Trust (Cloudflare One) analytics
 src/ztinventory.ts Zero Trust seats & inventory (REST)
 src/caps.ts        caps, thresholds, alert delivery (webhook / ntfy)

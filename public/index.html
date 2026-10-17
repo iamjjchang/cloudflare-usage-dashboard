@@ -74,6 +74,8 @@
   .status b { color: var(--text); font-weight: 600; }
   .group-title { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 8px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 600px), 1fr)); gap: 14px; }
+  .grid.wide { grid-template-columns: 1fr; }
+  .grid.wide .kpis { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 14px 16px; min-width: 0; }
   .card h3 { margin: 0; font-size: 15px; }
   .src { color: var(--muted); font-size: 11px; font-family: ui-monospace, Consolas, monospace; margin: 2px 0 12px; overflow-wrap: anywhere; }
@@ -550,7 +552,7 @@
     const notes = (warn.length ? `<div class="callout"><b>${warn.map((n) => esc(n)).join("<br>")}</b></div>` : "") +
       (plain.length ? `<ul class="notes">${plain.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` : "");
     const tables = s.tables.map((t, i) => {
-      const open = s.id === "cdn" || s.id === "good-requests" || s.id === "dns" || s.id === "spectrum" || (t.rows.length > 0 && t.rows.length <= 6 && i === 0);
+      const open = s.id === "cdn" || s.id === "good-requests" || s.id === "dns" || s.id === "spectrum" || (s.id === "zone-config" && i === 0) || (t.rows.length > 0 && t.rows.length <= 6 && i === 0);
       const hint = t.rows.some((r) => r.zoneId) ? ` <span class="badge">click a zone for detail</span>` : "";
       return `<details${open ? " open" : ""}><summary>${esc(t.title)}${hint}</summary>${tableHtml(t)}</details>`;
     }).join("");
@@ -943,6 +945,7 @@
         </section>
       </div>
 
+      ${d.config ? `<div class="group-title">Configuration</div><div class="grid wide">${card(d.config)}</div>` : ""}
       <div class="group-title">Daily trend</div>
       <div class="grid">
         <section class="card chart-card">

@@ -334,6 +334,50 @@ export function detectAccountId(token: string): Promise<string> {
 	return pending;
 }
 
+export type Obj = Record<string, unknown>;
+
+/** GET a list endpoint, following pages. Returns null when the token lacks permission (403). */
+export async function restList(api: Api, path: string, perPage = 50): Promise<Obj[] | null> {
+	const items: Obj[] = [];
+	for (let page = 1; ; page++) {
+		const sep = path.includes("?") ? "&" : "?";
+		let body: RestResponse<unknown>;
+		try {
+			body = await rest<unknown>(api, `${path}${sep}per_page=${perPage}&page=${page}`);
+		} catch (err) {
+			if (/HTTP 403/.test(String(err))) return null;
+			throw err;
+		}
+		// Some endpoints wrap the list (e.g. DEX tests: { dex_tests: [...] }).
+		const arr = Array.isArray(body.result) ? body.result : Object.values((body.result ?? {}) as Obj).find(Array.isArray) ?? [];
+		items.push(...(arr as Obj[]));
+		if (isLastPage({ ...body, result: arr }, page, perPage)) break;
+	}
+	return items;
+}
+
+/** GET a single object. Returns null when the token lacks permission (403). */
+export async function restOne(api: Api, path: string): Promise<Obj | null> {
+	try {
+		return ((await rest<Obj>(api, path)).result as Obj) ?? null;
+	} catch (err) {
+		if (/HTTP 403/.test(String(err))) return null;
+		throw err;
+	}
+}
+
+/** total_count of a list endpoint without fetching it all. Null on 403. */
+export async function restCount(api: Api, path: string, perPage = 5): Promise<number | null> {
+	try {
+		const sep = path.includes("?") ? "&" : "?";
+		const body = await rest<unknown[]>(api, `${path}${sep}per_page=${perPage}`);
+		return typeof body.result_info?.total_count === "number" ? body.result_info.total_count : Array.isArray(body.result) ? body.result.length : 0;
+	} catch (err) {
+		if (/HTTP 403/.test(String(err))) return null;
+		throw err;
+	}
+}
+
 export async function listZones(api: Api): Promise<Zone[]> {
 	const zones: Zone[] = [];
 	for (let page = 1; ; page++) {

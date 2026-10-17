@@ -22,6 +22,7 @@ import { buildSections, type Section } from "./usage";
 import { buildZeroTrust } from "./zerotrust";
 import { buildZtInventory } from "./ztinventory";
 import { zoneDetail } from "./zone";
+import { zoneConfig } from "./zoneconfig";
 
 /** CAPS is optional until the KV namespace is created (see README). */
 type AppEnv = Env & { CAPS?: KVNamespace };
@@ -130,7 +131,7 @@ async function handleUsage(_request: Request, url: URL, env: AppEnv, ctx: Execut
 	const api = await apiFor(env);
 	if (!api) return json({ error: "CF_API_TOKEN secret is not set" }, 500);
 
-	return cached(`usage?from=${from}&to=${to}&zones=${zoneFilter}`, url, to, ctx, async () => {
+	return cached(`usage-v2?from=${from}&to=${to}&zones=${zoneFilter}`, url, to, ctx, async () => {
 		const allZones = await listZones(api);
 		const zones = zoneFilter === "all" ? allZones : allZones.filter((z) => z.enterprise);
 		const body: UsageResponse = {
@@ -175,7 +176,7 @@ async function handleZone(_request: Request, url: URL, env: AppEnv, ctx: Executi
 	const api = await apiFor(env);
 	if (!api) return json({ error: "CF_API_TOKEN secret is not set" }, 500);
 
-	return cached(`zone?id=${id}&from=${from}&to=${to}`, url, to, ctx, async () => {
+	return cached(`zone-v2?id=${id}&from=${from}&to=${to}`, url, to, ctx, async () => {
 		// Only zones in this account; also gives the zone list for the switcher.
 		const zones = await listZones(api);
 		const zone = zones.find((z) => z.id === id);
@@ -185,7 +186,7 @@ async function handleZone(_request: Request, url: URL, env: AppEnv, ctx: Executi
 			range: { from, to, days: daysBetween(from, to), timezone: "UTC" },
 			zones,
 			generatedAt: new Date().toISOString(),
-			...(await zoneDetail(api, zone, { from, to })),
+			...(await Promise.all([zoneDetail(api, zone, { from, to }), zoneConfig(api, zone)]).then(([detail, config]) => ({ ...detail, config }))),
 		};
 	});
 }

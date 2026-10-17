@@ -1,5 +1,6 @@
 /** Builds one dashboard section per product from the analytics datasets. */
 
+import { zoneConfigTotals } from "./zoneconfig";
 import { accountRows, isLastPage, rest, splitRange, zoneRows, type Api, type DateRange, type Row, type Zone } from "./cloudflare";
 
 export type Unit = "count" | "bytes" | "percent" | "ms" | "seconds" | "gbSeconds" | "gibSeconds";
@@ -40,6 +41,7 @@ export async function buildSections(api: Api, zones: Zone[], range: DateRange): 
 	const builders: [string, () => Promise<Section[]>][] = [
 		["cdn", () => cdnAndGoodRequests(api, zones, range)],
 		["dns", async () => [await dnsQueries(api, zones, range)]],
+		["zone-config", async () => [await zoneConfigTotals(api, zones)]],
 		["spectrum", async () => [await spectrum(api, zones, range)]],
 		["images", async () => [await images(api, range)]],
 		["workers", async () => [await workers(api, range)]],
