@@ -6,6 +6,8 @@
  *                        -> usage for the account, dates inclusive, UTC
  *   GET /api/zone?id=<zoneId>&from=YYYY-MM-DD&to=YYYY-MM-DD
  *                        -> CDN, Bot Management and DNS detail for one zone
+ *   GET /api/zerotrust?from=YYYY-MM-DD&to=YYYY-MM-DD
+ *                        -> Zero Trust (Cloudflare One) usage for the account
  *   GET|PUT /api/config  -> monthly caps, alert thresholds and webhook (KV)
  *   POST /api/alerts/test -> send a test message to the webhook
  *   POST /api/alerts/run  -> run the cap check now (also runs hourly via cron)
@@ -17,6 +19,7 @@
 import { attachCapKeys, ConfigError, DEFAULT_CONFIG, loadAlertState, loadConfig, runAlerts, saveConfig, sendTestAlert } from "./caps";
 import { ApiError, detectAccountId, listZones, type Api, type Zone } from "./cloudflare";
 import { buildSections, type Section } from "./usage";
+import { buildZeroTrust } from "./zerotrust";
 import { zoneDetail } from "./zone";
 
 /** CAPS is optional until the KV namespace is created (see README). */
@@ -35,6 +38,7 @@ export default {
 		const routes: Record<string, Handler> = {
 			"/api/usage": handleUsage,
 			"/api/zone": handleZone,
+			"/api/zerotrust": handleZeroTrust,
 			"/api/config": handleConfig,
 			"/api/alerts/test": handleTestAlert,
 			"/api/alerts/run": handleRunAlerts,
@@ -139,6 +143,23 @@ async function handleUsage(_request: Request, url: URL, env: AppEnv, ctx: Execut
 		attachCapKeys(body.sections);
 		return body;
 	});
+}
+
+async function handleZeroTrust(_request: Request, url: URL, env: AppEnv, ctx: ExecutionContext): Promise<Response> {
+	const from = url.searchParams.get("from") ?? "";
+	const to = url.searchParams.get("to") ?? "";
+	const problem = validateRange(from, to);
+	if (problem) return json({ error: problem }, 400);
+	const api = await apiFor(env);
+	if (!api) return json({ error: "CF_API_TOKEN secret is not set" }, 500);
+
+	return cached(`zerotrust?from=${from}&to=${to}`, url, to, ctx, async () => ({
+		accountId: api.accountId,
+		range: { from, to, days: daysBetween(from, to), timezone: "UTC" },
+		zones: [],
+		generatedAt: new Date().toISOString(),
+		sections: await buildZeroTrust(api, { from, to }),
+	}));
 }
 
 async function handleZone(_request: Request, url: URL, env: AppEnv, ctx: ExecutionContext): Promise<Response> {

@@ -506,6 +506,62 @@ Other dimensions available: `coloName`, `destinationIP`, `ipVersion`, `protocol`
 
 ---
 
+## 9. Zero Trust (Cloudflare One)
+
+The `cf1…` rollups filter on `datetime` (a Time), not `date`. The `1d` rollups allow a 90-day window
+and keep 365 days; `1h` rollups allow 31 days and keep 62; `Raw` allows 3 hours.
+
+```graphql
+query ($a: String!, $s: Time!, $u: Time!) {
+  viewer {
+    accounts(filter: { accountTag: $a }) {
+      access: cf1AccessLogins1dGroups(limit: 100, filter: { datetime_geq: $s, datetime_lt: $u }, orderBy: [sum_logins_DESC]) {
+        sum { logins }
+        uniq { users }
+        dimensions { appName }
+      }
+      dns: cf1GatewayDns1dGroups(limit: 1, filter: { datetime_geq: $s, datetime_lt: $u }) {
+        sum { queries queryBytes responseBytes }
+        uniq { users devices }
+      }
+      http: cf1GatewayHttp1dGroups(limit: 1, filter: { datetime_geq: $s, datetime_lt: $u }) {
+        sum { requests bodyBytesSent bodyBytesRcvd dlpMatchedRequestsTotal avBlockedFiles isolatedRequests }
+        uniq { users applications }
+      }
+      network: cf1GatewayNetwork1dGroups(limit: 1, filter: { datetime_geq: $s, datetime_lt: $u }) {
+        sum { requests }
+        uniq { sessions users devices }
+      }
+      sessions: cf1GatewayNetworkSession1dGroups(limit: 1, filter: { datetime_geq: $s, datetime_lt: $u }) {
+        sum { sessions bytesTotal bytesUpload bytesDownload }
+        avg { tcpHandshakeMs }
+      }
+      warp: warpDeviceAdaptiveGroups(limit: 20, filter: { datetime_geq: $s, datetime_lt: $u }, orderBy: [count_DESC]) {
+        count
+        uniq { deviceIds }
+        dimensions { clientPlatform }
+      }
+      tunnel: cloudflareTunnelsAnalyticsAdaptiveGroups(limit: 1, filter: { datetime_geq: $s, datetime_lt: $u }) {
+        sum { bits egressBits }
+      }
+    }
+  }
+}
+```
+
+Variables:
+
+```json
+{ "a": "<ACCOUNT_ID>", "s": "2026-09-01T00:00:00Z", "u": "2026-10-01T00:00:00Z" }
+```
+
+> Limits seen: `accessLoginRequestsAdaptiveGroups` allows 1 week per query; long `cf1AccessLogins1dGroups`
+> ranges can fail with "would read too much data" (split the range); `zeroTrustPrivateNetworkDiscoveryGroups`
+> and `privacyProxy*` filter on `date`. Gateway DNS `resolverDecision` codes are listed in the
+> [Gateway logs docs](https://developers.cloudflare.com/cloudflare-one/insights/logs/dashboard-logs/gateway-logs/#resolver-decisions).
+
+---
+
 ## Appendix — schema introspection used to discover datasets
 
 List datasets on account / zone:

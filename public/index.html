@@ -38,7 +38,7 @@
   .range-btn .tz { color: var(--muted); font-size: 12px; }
   .pop {
     position: absolute; top: calc(100% + 6px); right: 0; display: none; background: var(--panel);
-    border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.18); width: 520px; max-width: calc(100vw - 32px);
+    border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px rgba(0,0,0,.18); width: 560px; max-width: calc(100vw - 32px);
   }
   .pop.open { display: grid; grid-template-columns: 180px 1fr; }
   .presets { border-right: 1px solid var(--line); padding: 6px; display: flex; flex-direction: column; }
@@ -51,6 +51,24 @@
   .abs input { width: 100%; }
   .abs .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
   .abs .err { color: #d4483b; font-size: 12px; min-height: 16px; }
+  .abs .dates { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .cal { border: 1px solid var(--line); border-radius: 8px; padding: 10px; user-select: none; }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .cal-head b { font-size: 14px; }
+  .cal-head button { padding: 2px 9px; font-size: 15px; line-height: 1.4; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px 0; text-align: center; }
+  .cal-grid .dow { font-size: 11px; color: var(--muted); padding: 2px 0 4px; }
+  .cal-grid button.day { border: 0; border-radius: 0; background: transparent; padding: 0; height: 32px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text); }
+  .cal-grid button.day:hover:not(:disabled) { background: var(--chip); }
+  .cal-grid button.day.out { color: var(--muted); opacity: .5; }
+  .cal-grid button.day:disabled { color: var(--muted); opacity: .35; cursor: default; }
+  .cal-grid button.day.in { background: var(--accent-soft); }
+  .cal-grid button.day.start, .cal-grid button.day.end { background: var(--accent); color: var(--accent-ink); font-weight: 650; }
+  .cal-grid button.day.start { border-radius: 6px 0 0 6px; }
+  .cal-grid button.day.end { border-radius: 0 6px 6px 0; }
+  .cal-grid button.day.start.end { border-radius: 6px; }
+  .cal-grid button.day.today { box-shadow: inset 0 0 0 1px var(--accent); }
+  .cal-hint { font-size: 11px; color: var(--muted); margin-top: 6px; }
   main { max-width: 1280px; margin: 0 auto; padding: 16px; }
   .status { color: var(--muted); font-size: 12px; margin: 0 0 14px; display: flex; flex-wrap: wrap; gap: 6px 16px; }
   .status b { color: var(--text); font-weight: 600; }
@@ -171,8 +189,11 @@
         <div class="presets" id="presets"></div>
         <div class="abs">
           <h4>Absolute date range (UTC)</h4>
-          <label>From <input type="date" id="fromIn"></label>
-          <label>To <input type="date" id="toIn"></label>
+          <div class="dates">
+            <label>From <input type="date" id="fromIn"></label>
+            <label>To <input type="date" id="toIn"></label>
+          </div>
+          <div class="cal" id="cal" aria-label="Calendar"></div>
           <div class="err" id="rangeErr"></div>
           <div class="row">
             <button id="cancelBtn">Cancel</button>
@@ -185,6 +206,7 @@
       <option value="enterprise">Enterprise zones</option>
       <option value="all">All zones</option>
     </select>
+    <button id="ztBtn" title="Zero Trust (Cloudflare One) usage">Zero Trust</button>
     <button id="capsBtn" title="Monthly caps and alert thresholds">Caps &amp; alerts</button>
     <button id="refreshBtn" title="Re-query Cloudflare (skip cache)">Refresh</button>
     <button id="csvBtn" disabled>Download CSV</button>
@@ -214,13 +236,16 @@
   ];
 
   const params = new URLSearchParams(location.search);
+  function pageFrom(view) {
+    return view === "caps" ? "caps" : view === "zerotrust" ? "zt" : null;
+  }
   const lastMonth = presets.find((p) => p.id === "lm").range();
   const state = {
     from: params.get("from") || lastMonth[0],
     to: params.get("to") || lastMonth[1],
     zones: params.get("zones") === "all" ? "all" : "enterprise",
     zone: params.get("zone") || null,
-    page: params.get("view") === "caps" ? "caps" : null,
+    page: pageFrom(params.get("view")),
     view: null,
     data: null,
     config: null,
@@ -253,9 +278,12 @@
       $("fromIn").max = $("toIn").max = todayUtc();
       $("rangeErr").textContent = "";
       renderPresets();
+      cal.month = monthOf(state.to);
+      renderCal();
     }
   }
   function apply() {
+    if ($("fromIn").value && !$("toIn").value) $("toIn").value = $("fromIn").value;
     const f = $("fromIn").value, t = $("toIn").value;
     if (!f || !t) return void ($("rangeErr").textContent = "Pick both dates.");
     if (f > t) return void ($("rangeErr").textContent = "From must be on or before To.");
@@ -269,7 +297,76 @@
   pop.onclick = (e) => e.stopPropagation();
   document.addEventListener("click", () => openPop(false));
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") openPop(false); });
-  $("fromIn").oninput = $("toIn").oninput = renderPresets;
+  $("fromIn").oninput = $("toIn").oninput = () => {
+    renderPresets();
+    const v = $("toIn").value || $("fromIn").value;
+    if (v) cal.month = monthOf(v);
+    renderCal();
+  };
+
+  // ---- calendar grid (inside the date picker) -------------------------------
+  const cal = { month: null, hover: null };
+  const DOW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+  function monthOf(isoDay) { return isoDay.slice(0, 7) + "-01"; }
+  function addMonths(first, n) {
+    const d = new Date(first + "T00:00:00Z");
+    return iso(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1));
+  }
+  function renderCal() {
+    const el = $("cal");
+    if (!cal.month) cal.month = monthOf(todayUtc());
+    const first = new Date(cal.month + "T00:00:00Z");
+    const title = first.toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+    const start = Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1 - first.getUTCDay());
+    const today = todayUtc();
+    let cells = DOW.map((d) => `<div class="dow">${d}</div>`).join("");
+    for (let i = 0; i < 42; i++) {
+      const day = iso(start + i * DAY);
+      const out = day.slice(0, 7) !== cal.month.slice(0, 7) ? " out" : "";
+      const now = day === today ? " today" : "";
+      cells += `<button type="button" class="day${out}${now}" data-day="${day}" ${day > today ? "disabled" : ""} aria-label="${day}">${Number(day.slice(8))}</button>`;
+    }
+    const nextDisabled = addMonths(cal.month, 1) > today ? "disabled" : "";
+    el.innerHTML = `<div class="cal-head"><button type="button" data-nav="-1" aria-label="Previous month">‹</button><b>${esc(title)}</b><button type="button" data-nav="1" aria-label="Next month" ${nextDisabled}>›</button></div>
+      <div class="cal-grid">${cells}</div>
+      <div class="cal-hint"></div>`;
+    paintCal();
+  }
+  /** Marks the selected range on the existing day buttons (no re-render, so clicks are never lost). */
+  function paintCal() {
+    let from = $("fromIn").value, to = $("toIn").value;
+    // While picking the end date, preview the range under the pointer.
+    if (from && !to && cal.hover) to = cal.hover;
+    if (from && to && to < from) [from, to] = [to, from];
+    for (const b of $("cal").querySelectorAll("button[data-day]")) {
+      const day = b.dataset.day;
+      b.classList.toggle("in", !!(from && to && day > from && day < to));
+      b.classList.toggle("start", day === from);
+      b.classList.toggle("end", day === (to || from));
+    }
+    const hint = $("cal").querySelector(".cal-hint");
+    if (hint) hint.textContent = $("fromIn").value && !$("toIn").value ? "Now pick the end date." : "Click a start date, then an end date.";
+  }
+  $("cal").addEventListener("click", (e) => {
+    const nav = e.target.closest("[data-nav]");
+    if (nav) { cal.month = addMonths(cal.month, Number(nav.dataset.nav)); renderCal(); return; }
+    const b = e.target.closest("button[data-day]");
+    if (!b || b.disabled) return;
+    const day = b.dataset.day, from = $("fromIn").value, to = $("toIn").value;
+    if (!from || to) { $("fromIn").value = day; $("toIn").value = ""; }
+    else if (day < from) { $("fromIn").value = day; $("toIn").value = from; }
+    else { $("toIn").value = day; }
+    cal.hover = null;
+    $("rangeErr").textContent = "";
+    renderPresets();
+    paintCal();
+  });
+  $("cal").addEventListener("mouseover", (e) => {
+    const b = e.target.closest("button[data-day]");
+    if (!b || !$("fromIn").value || $("toIn").value || cal.hover === b.dataset.day) return;
+    cal.hover = b.dataset.day;
+    paintCal();
+  });
   $("applyBtn").onclick = apply;
   $("cancelBtn").onclick = () => openPop(false);
   $("zoneSel").onchange = () => { state.zones = $("zoneSel").value; load(false, false); };
@@ -321,6 +418,8 @@
     $("rangeLabel").textContent = rangeLabel();
     if (state.page === "caps") return loadCaps(ticket, fresh, push);
     $("capsBtn").classList.remove("on");
+    if (state.page === "zt") return loadZt(ticket, fresh, push);
+    $("ztBtn").classList.remove("on");
     const q = new URLSearchParams({ from: state.from, to: state.to, zones: state.zones });
     if (state.zone) q.set("zone", state.zone);
     history[push ? "pushState" : "replaceState"](null, "", "?" + q);
@@ -380,7 +479,7 @@
     state.to = p.get("to") || state.to;
     state.zones = p.get("zones") === "all" ? "all" : "enterprise";
     state.zone = p.get("zone") || null;
-    state.page = p.get("view") === "caps" ? "caps" : null;
+    state.page = pageFrom(p.get("view"));
     $("zoneSel").value = state.zones;
     load(false, false);
   });
@@ -528,6 +627,7 @@
     const q = new URLSearchParams({ view: "caps", from: state.from, to: state.to, zones: state.zones });
     history[push ? "pushState" : "replaceState"](null, "", "?" + q);
     $("capsBtn").classList.add("on");
+    $("ztBtn").classList.remove("on");
     $("zoneSel").hidden = true;
     $("csvBtn").disabled = true;
     $("refreshBtn").disabled = true;
@@ -709,6 +809,67 @@
   }
 
   window.addEventListener("beforeunload", (e) => { if (state.page === "caps" && state.capsDirty) e.preventDefault(); });
+
+  // ---- Zero Trust page -------------------------------------------------------
+  function openZt() {
+    if (state.page === "caps" && state.capsDirty && !confirm("Leave without saving your cap changes?")) return;
+    state.page = "zt";
+    state.zone = null;
+    window.scrollTo(0, 0);
+    load(false, true);
+  }
+  $("ztBtn").onclick = () => {
+    if (state.page === "zt") { state.page = null; load(false, true); } else openZt();
+  };
+
+  async function loadZt(ticket, fresh, push) {
+    const q = new URLSearchParams({ view: "zerotrust", from: state.from, to: state.to, zones: state.zones });
+    history[push ? "pushState" : "replaceState"](null, "", "?" + q);
+    $("ztBtn").classList.add("on");
+    $("capsBtn").classList.remove("on");
+    $("zoneSel").hidden = true;
+    $("csvBtn").disabled = true;
+    $("refreshBtn").disabled = true;
+    $("status").textContent = "";
+    $("content").innerHTML = `<div class="loading"><div class="spinner"></div>Querying Zero Trust analytics for ${esc(fmtDay(state.from))} – ${esc(fmtDay(state.to))}…</div>`;
+    try {
+      const api = new URLSearchParams({ from: state.from, to: state.to });
+      if (fresh) api.set("fresh", "1");
+      const res = await fetch(`${location.origin}/api/zerotrust?${api}`, { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
+      const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (ticket !== inflight) return;
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      state.data = body;
+      state.view = "zt";
+      renderZt(body, res.headers.get("X-Cache"));
+      $("csvBtn").disabled = false;
+    } catch (err) {
+      if (ticket !== inflight) return;
+      $("content").innerHTML = `<div class="fatal"><b>Could not load Zero Trust usage.</b><br>${esc(errText(err))}</div>`;
+    } finally {
+      if (ticket === inflight) $("refreshBtn").disabled = false;
+    }
+  }
+
+  function renderZt(d, cacheState) {
+    const products = d.sections.filter((x) => x.id !== "zt-other");
+    const active = products.filter((x) => !x.notes.includes("No activity in this date range."));
+    statusLine(d, cacheState, `<span>Zero Trust: <b>${active.length} of ${products.length}</b> products with activity</span>`);
+    const groups = [...new Set(d.sections.map((x) => x.group))];
+    // Products with activity first within each group; empty ones collapse to a compact list.
+    $("content").innerHTML = `
+      <div class="zhead"><a class="back" href="#" id="ztBack">← Back to usage</a><h2>Zero Trust</h2><span class="chip">Cloudflare One</span></div>
+      ${groups.map((g) => {
+        const all = d.sections.filter((x) => x.group === g);
+        const live = all.filter((x) => !x.notes.includes("No activity in this date range."));
+        const idle = all.filter((x) => x.notes.includes("No activity in this date range."));
+        return `<div class="group-title">${esc(g.replace(/^Zero Trust · /, ""))}</div>
+          ${live.length ? `<div class="grid">${live.map(card).join("")}</div>` : ""}
+          ${idle.length ? `<p class="muted" style="margin:${live.length ? "10px" : "0"} 0 0">No activity in this range: ${idle.map((x) => esc(x.title)).join(" · ")}</p>` : ""}`;
+      }).join("")}
+      <ul class="notes"><li>Daily rollups (Access, Gateway, Shadow IT, MCP) are exact and keep a year of history. WARP, Tunnel, Browser Isolation and other sampled datasets keep about a month.</li></ul>`;
+    $("ztBack").onclick = (e) => { e.preventDefault(); state.page = null; load(false, true); };
+  }
 
   // ---- zone drill-down ----------------------------------------------------
   const SERIES = {
@@ -934,7 +1095,7 @@
       for (const p of d.daily) for (const [k, v] of Object.entries(p)) if (k !== "date") lines.push([d.zone.name, "Daily", p.date, k, v, ""].map(q).join(","));
       for (const b of d.breakdowns) tableRows(d.zone.name, b);
     } else {
-      name = `cloudflare-usage_${d.range.from}_${d.range.to}.csv`;
+      name = `cloudflare-${state.view === "zt" ? "zerotrust" : "usage"}_${d.range.from}_${d.range.to}.csv`;
       for (const s of d.sections) {
         for (const m of s.metrics) lines.push([s.title, "", "", m.label, m.value ?? "", m.unit].map(q).join(","));
         for (const t of s.tables) tableRows(s.title, t);

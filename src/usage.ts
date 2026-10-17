@@ -27,7 +27,7 @@ export interface Table {
 
 export interface Section {
 	id: string;
-	group: "Zones" | "Media" | "Developer platform";
+	group: string;
 	title: string;
 	source: string;
 	metrics: Metric[];

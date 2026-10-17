@@ -86,6 +86,80 @@ export async function accountRows(
 	});
 }
 
+/**
+ * Same as accountRows, for datasets filtered by `datetime` (a Time) instead of `date`
+ * — the Zero Trust `cf1…` rollups and most adaptive datasets. Each window covers whole
+ * UTC days: [from 00:00, day after `to` 00:00), capped at "now".
+ */
+export async function accountRowsByTime(
+	api: Api,
+	dataset: string,
+	selection: string,
+	range: DateRange,
+	opts: QueryOpts = {},
+): Promise<RowsResult> {
+	const query = `query($a: String!, $s: Time!, $u: Time!) {
+		viewer { accounts(filter: { accountTag: $a }) {
+			rows: ${dataset}(limit: ${opts.limit ?? 10000}${opts.orderBy ? `, orderBy: [${opts.orderBy}]` : ""}, filter: { datetime_geq: $s, datetime_lt: $u${opts.extraFilter ? `, ${opts.extraFilter}` : ""} }) ${selection}
+		} }
+	}`;
+	return runWindows(range, opts.maxDays ?? 31, async (w) => {
+		const end = Math.min(Date.parse(`${w.to}T00:00:00Z`) + 86_400_000, Date.now());
+		const data = await gql<{ viewer: { accounts: { rows: Row[] }[] } }>(api, query, {
+			a: api.accountId,
+			s: `${w.from}T00:00:00Z`,
+			u: new Date(end).toISOString().replace(/\.\d{3}Z$/, "Z"),
+		});
+		return data.viewer.accounts[0]?.rows ?? [];
+	});
+}
+
+export interface AliasQuery {
+	selection: string;
+	limit?: number;
+	orderBy?: string;
+	extraFilter?: string;
+}
+
+/**
+ * Several views of one account dataset in a single GraphQL request (one alias per view),
+ * split into windows like accountRows. Returns rows per alias.
+ */
+export async function accountAliases(
+	api: Api,
+	dataset: string,
+	aliases: Record<string, AliasQuery>,
+	range: DateRange,
+	opts: { maxDays?: number; byDate?: boolean } = {},
+): Promise<{ rows: Record<string, Row[]>; errors: string[] }> {
+	const byDate = opts.byDate ?? false;
+	const vars = byDate ? "$s: Date!, $u: Date!" : "$s: Time!, $u: Time!";
+	const timeFilter = byDate ? "date_geq: $s, date_leq: $u" : "datetime_geq: $s, datetime_lt: $u";
+	const parts = Object.entries(aliases).map(
+		([alias, q]) =>
+			`${alias}: ${dataset}(limit: ${q.limit ?? 1000}${q.orderBy ? `, orderBy: [${q.orderBy}]` : ""}, filter: { ${timeFilter}${q.extraFilter ? `, ${q.extraFilter}` : ""} }) ${q.selection}`,
+	);
+	const query = `query($a: String!, ${vars}) { viewer { accounts(filter: { accountTag: $a }) { ${parts.join("\n")} } } }`;
+
+	const result = await runWindows(range, opts.maxDays ?? 31, async (w) => {
+		const end = Math.min(Date.parse(`${w.to}T00:00:00Z`) + 86_400_000, Date.now());
+		const variables = byDate
+			? { a: api.accountId, s: w.from, u: w.to }
+			: { a: api.accountId, s: `${w.from}T00:00:00Z`, u: new Date(end).toISOString().replace(/\.\d{3}Z$/, "Z") };
+		const data = await gql<{ viewer: { accounts: Record<string, Row[]>[] } }>(api, query, variables);
+		const acct = data.viewer.accounts[0] ?? {};
+		// Tag each row with its alias so runWindows can merge windows; split again below.
+		return Object.keys(aliases).flatMap((alias) => (acct[alias] ?? []).map((r) => ({ ...r, __alias: alias })));
+	});
+
+	const rows: Record<string, Row[]> = Object.fromEntries(Object.keys(aliases).map((a) => [a, [] as Row[]]));
+	for (const r of result.rows) {
+		const { __alias, ...rest } = r as Row & { __alias: string };
+		rows[__alias].push(rest);
+	}
+	return { rows, errors: result.errors };
+}
+
 export async function zoneRows(
 	api: Api,
 	zoneId: string,
@@ -106,30 +180,62 @@ export async function zoneRows(
 }
 
 async function runWindows(range: DateRange, maxDays: number, fn: (w: DateRange) => Promise<Row[]>): Promise<RowsResult> {
-	const windows = splitRange(range, maxDays);
 	const rows: Row[] = [];
 	const errors: string[] = [];
-	await Promise.all(
-		windows.map(async (w) => {
-			try {
-				rows.push(...(await fn(w)));
-			} catch (err) {
-				// Window starts before the dataset's retention: retry with what is still kept.
-				const earliest = retentionStart(err);
-				if (earliest && earliest > w.from && earliest <= w.to) {
-					try {
-						rows.push(...(await fn({ from: earliest, to: w.to })));
-						errors.push(`Partial: Cloudflare only keeps this data from ${earliest}, so ${w.from} → ${prevDay(earliest)} is missing.`);
-						return;
-					} catch (retryErr) {
-						err = retryErr;
-					}
-				}
-				errors.push(`${w.from} → ${w.to}: ${cleanError(err)}`);
+
+	const run = async (w: DateRange, depth: number): Promise<void> => {
+		try {
+			rows.push(...(await fn(w)));
+		} catch (err) {
+			// Range wider than this dataset allows (e.g. "wider than 1w"), or a query that would
+			// read too much data: split smaller and retry.
+			const tooMuch = /read too much data/i.test(err instanceof Error ? err.message : String(err));
+			const days = splitRange(w, 1).length;
+			const allowed = maxRangeDays(err) ?? (tooMuch && days > 1 ? Math.ceil(days / 2) : null);
+			if (allowed && depth < 3 && splitRange(w, allowed).length > 1) {
+				await Promise.all(splitRange(w, allowed).map((sub) => run(sub, depth + 1)));
+				return;
 			}
-		}),
-	);
-	return { rows, errors };
+			// Window starts before the dataset's retention: retry with what is still kept.
+			const earliest = retentionStart(err);
+			if (earliest && earliest > w.from && earliest <= w.to && depth < 3) {
+				errors.push(`Partial: Cloudflare only keeps this data from ${earliest}, so ${w.from} → ${prevDay(earliest)} is missing.`);
+				await run({ from: earliest, to: w.to }, depth + 1);
+				return;
+			}
+			// Entirely before retention: covered by the "Partial" note of the window that crosses it.
+			if (earliest && earliest > w.to) {
+				errors.push(`Partial: Cloudflare only keeps this data from ${earliest}, so ${w.from} → ${w.to} is missing.`);
+				return;
+			}
+			errors.push(`${w.from} → ${w.to}: ${cleanError(err)}`);
+		}
+	};
+
+	await Promise.all(splitRange(range, maxDays).map((w) => run(w, 0)));
+	return { rows, errors: mergePartial(errors) };
+}
+
+/** From "cannot request a time range wider than 1w", the allowed window in whole days. */
+function maxRangeDays(err: unknown): number | null {
+	const m = /wider than ((?:\d+w)?(?:\d+d)?(?:\d+h)?)/.exec(err instanceof Error ? err.message : String(err));
+	if (!m || !m[1]) return null;
+	const part = (u: string) => Number(new RegExp(`(\\d+)${u}`).exec(m[1])?.[1] ?? 0);
+	const days = Math.floor(part("w") * 7 + part("d") + part("h") / 24);
+	return days >= 1 ? days : null;
+}
+
+/** Several windows can each report missing days; show one combined note. */
+function mergePartial(errors: string[]): string[] {
+	const partial = errors.filter((e) => e.startsWith("Partial:"));
+	if (partial.length <= 1) return errors;
+	const keeps = partial.map((e) => /keeps this data from (\d{4}-\d{2}-\d{2})/.exec(e)?.[1] ?? "").sort();
+	const firstMissing = partial.map((e) => /so (\d{4}-\d{2}-\d{2}) →/.exec(e)?.[1] ?? "").sort()[0];
+	const earliest = keeps[keeps.length - 1];
+	return [
+		`Partial: Cloudflare only keeps this data from ${earliest}, so ${firstMissing} → ${prevDay(earliest)} is missing.`,
+		...errors.filter((e) => !e.startsWith("Partial:")),
+	];
 }
 
 /** From "cannot request data older than 4w4d", the first full UTC day still queryable. */

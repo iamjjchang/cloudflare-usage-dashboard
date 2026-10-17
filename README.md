@@ -2,8 +2,8 @@
 
 A self-hosted dashboard for your Cloudflare account's usage, running as a single Cloudflare
 Worker. Pick any date range (say Sep 1 – Sep 30) and see CDN, Bot Management, DNS, Spectrum,
-Images and developer-platform usage side by side, drill into any zone, set monthly caps,
-and get alerted (Slack, Discord, Teams, Google Chat, ntfy or any webhook) before you hit them.
+Images, developer-platform and Zero Trust usage side by side, drill into any zone, set monthly
+caps, and get alerted (Slack, Discord, Teams, Google Chat, ntfy or any webhook) before you hit them.
 
 It reads Cloudflare's [GraphQL Analytics API](https://developers.cloudflare.com/analytics/graphql-api/)
 with a read-only API token. Nothing leaves your account except the alerts you configure.
@@ -36,6 +36,24 @@ with a read-only API token. Nothing leaves your account except the alerts you co
 - Bot Management: decision (automated / likely human / verified bot), bot score distribution, detection engine, verified bot categories, security actions
 - DNS: query types, response codes, top query names, protocol & IP version, cached answers, top data centers
 - Daily table and CSV export
+
+**Zero Trust page** – every Cloudflare One analytics dataset for the selected dates:
+
+| Area | What you see | Datasets |
+|---|---|---|
+| Access | Logins, unique users, denied logins, login requests; by application, identity provider, login type, country | `cf1AccessLogins1dGroups`, `accessLoginRequestsAdaptiveGroups` |
+| Gateway DNS | Queries, bytes, users, devices; by resolver decision, query type, response code, location, policy, country | `cf1GatewayDns1dGroups` |
+| Gateway HTTP | Requests, data, users, applications, DLP scans/matches, antivirus and sandbox results, isolated requests, MCP URLs; by action, host, country | `cf1GatewayHttp1dGroups` |
+| Gateway network | L4 firewall events, sessions, users, devices; by action, transport, SNI, rule, destination country | `cf1GatewayNetwork1dGroups` |
+| Proxied sessions | Sessions, bytes up/down, TCP handshake time; by protocol, egress IP, on-ramp, close reason | `cf1GatewayNetworkSession1dGroups` |
+| Shadow IT / MCP | Applications seen and their approval status, MCP servers used by AI agents | `shadowIt1hGroups`, `cf1McpHost1dGroups` |
+| WARP / Tunnel / Isolation | Devices by platform, version, status, mode; Tunnel traffic by device; Browser Isolation sessions and user actions | `warpDeviceAdaptiveGroups`, `cloudflareTunnelsAnalyticsAdaptiveGroups`, `browserIsolation*` |
+| Private networks & more | Private network discovery, plus a status table for every remaining sampled dataset (resolver, L4/L7 detail, Privacy Proxy, sinkhole) | `zeroTrustPrivateNetworkDiscoveryGroups` and others |
+
+Products with no activity in the range collapse into a single line, so the page stays readable.
+
+**Date picker** – presets (last 7/14/30/90 days, this month, last month…) plus a calendar: click a
+start date, then an end date. Works the same on every page.
 
 **Caps & alerts** – set a monthly cap for any of 35 billable metrics and two thresholds with
 sliders (default: warning 80%, critical 90%).
@@ -136,6 +154,7 @@ All endpoints need the dashboard password (HTTP Basic auth).
 |---|---|
 | `GET /api/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&zones=enterprise\|all` | Account usage: `{ range, zones, sections[] }` |
 | `GET /api/zone?id=<zoneId>&from=…&to=…` | One zone: `{ zone, daily[], totals, breakdowns[], errors }` |
+| `GET /api/zerotrust?from=…&to=…` | Zero Trust usage: `{ range, sections[] }` |
 | `GET` / `PUT /api/config` | Caps, thresholds, webhook |
 | `POST /api/alerts/test` | Sends a test alert |
 | `POST /api/alerts/run` | Runs the cap check now |
@@ -155,6 +174,9 @@ Every GraphQL query the dashboard uses is documented in [docs/graphql-queries.md
   historical peak.
 - **Image transformations** are counted per calendar month from the 1st.
 - **Caps** are per calendar month (UTC).
+- **Zero Trust history.** The daily rollups (Access, Gateway, Shadow IT, MCP) keep a year. WARP,
+  Tunnel, Browser Isolation and the sampled datasets keep about a month. Ranges are split
+  automatically to fit each dataset's limits (for example Access login requests: 1 week per query).
 
 ## Troubleshooting
 
@@ -172,6 +194,7 @@ Every GraphQL query the dashboard uses is documented in [docs/graphql-queries.md
 src/index.ts       routing, password check, caching, cron handler
 src/usage.ts       one section per product (account overview)
 src/zone.ts        zone drill-down
+src/zerotrust.ts   Zero Trust (Cloudflare One) page
 src/caps.ts        caps, thresholds, alert delivery (webhook / ntfy)
 src/cloudflare.ts  GraphQL + REST clients, range splitting, retention fallback
 public/index.html  the dashboard UI (no build step, no dependencies)
