@@ -889,9 +889,11 @@
     const pct = (a, b) => (b > 0 ? (a / b) * 100 : null);
     statusLine(d, cacheState, `<span>Zone: <b>${esc(d.zone.name)}</b></span>`);
     const decision = d.breakdowns.find((b) => b.id === "decision");
-    const human = decision && decision.rows.length
-      ? decision.rows.filter((r) => r.key === "likely_human" || r.key === "verified_bot").reduce((s, r) => s + (r.share || 0), 0)
-      : null;
+    const botClass = (key, label, hint) => {
+      const r = decision && decision.rows.length ? decision.rows.find((x) => x.key === key) : null;
+      const v = decision && decision.rows.length ? (r ? r.requests : 0) : null;
+      return { label, value: v, unit: "count", hint: r && r.share != null ? `${hint} · ${r.share.toFixed(1)}%` : hint };
+    };
     const options = d.zones.map((z) => `<option value="${esc(z.id)}"${z.id === d.zone.id ? " selected" : ""}>${esc(z.name)} — ${esc(z.plan)}</option>`).join("");
     const dnsCodes = d.breakdowns.find((b) => b.id === "dnsCode");
     const codeShare = (code) => (dnsCodes && dnsCodes.rows.length ? (dnsCodes.rows.find((r) => r.key === code)?.share ?? 0) : null);
@@ -925,12 +927,13 @@
           ].map(kpiHtml).join("")}</div>
         </section>
         <section class="card">
-          <h3>Bot Management – good requests</h3><div class="src">requests − threats · exact; bot classes sampled</div>
+          <h3>Bot Management – traffic classes</h3><div class="src">botManagementDecision · sampled; good requests exact</div>
           <div class="kpis">${[
-            { label: "Good requests", value: t.good, unit: "count" },
-            { label: "Threats (blocked / challenged)", value: t.threats, unit: "count" },
-            { label: "Good share", value: pct(t.good, t.requests), unit: "percent" },
-            { label: "Human or verified bot", value: human, unit: "percent", hint: "Bot Management decision, sampled" },
+            botClass("automated", "Automated", "Bot score 1"),
+            botClass("likely_automated", "Likely automated", "Bot score 2–29"),
+            botClass("likely_human", "Likely human", "Bot score 30–99"),
+            botClass("verified_bot", "Verified bot", "Known good bots"),
+            { label: "Good requests", value: t.good, unit: "count", hint: "Requests − threats (exact)" },
           ].map(kpiHtml).join("")}</div>
         </section>
         <section class="card">

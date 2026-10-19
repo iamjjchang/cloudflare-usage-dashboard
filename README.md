@@ -15,7 +15,7 @@ with a read-only API token. Nothing leaves your account except the alerts you co
 | Product | Metrics | Source |
 |---|---|---|
 | CDN (per zone) | Requests, data transfer, cache share | `httpRequests1dGroups` (exact) |
-| Bot Management (per zone) | Good requests = requests − threats | `httpRequests1dGroups` (exact) |
+| Bot Management (per zone) | Automated, likely automated, likely human and verified bot requests; good requests = requests − threats | `httpRequestsAdaptiveGroups` `botManagementDecision` (sampled), `httpRequests1dGroups` (exact) |
 | DNS (per zone) | DNS queries, NOERROR / NXDOMAIN share | `dnsAnalyticsAdaptiveGroups` |
 | Spectrum (per zone) | IPv4 addresses, data in/out, connections, concurrent now | REST `/spectrum/apps`, `/spectrum/analytics/*` |
 | Images | Unique transformations per month (billable) and per day | `imagesUniqueTransformations*` |

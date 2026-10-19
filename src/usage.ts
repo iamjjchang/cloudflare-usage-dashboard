@@ -63,11 +63,36 @@ export async function buildSections(api: Api, zones: Zone[], range: DateRange): 
 // ---------------------------------------------------------------------------
 // Zones: CDN requests, data transfer and Bot Management good requests
 
+type BotClass = "automated" | "likely_automated" | "likely_human" | "verified_bot";
+const BOT_CLASSES: [BotClass, string, string][] = [
+	["automated", "Automated", "Bot score 1"],
+	["likely_automated", "Likely automated", "Bot score 2–29"],
+	["likely_human", "Likely human", "Bot score 30–99"],
+	["verified_bot", "Verified bot", "Known good bots"],
+];
+
 async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Promise<Section[]> {
 	const perZone = await Promise.all(
 		zones.map(async (z) => {
-			const r = await zoneRows(api, z.id, "httpRequests1dGroups", "{ sum { requests bytes cachedRequests cachedBytes threats } }", range);
+			const [r, b] = await Promise.all([
+				zoneRows(api, z.id, "httpRequests1dGroups", "{ sum { requests bytes cachedRequests cachedBytes threats } }", range),
+				zoneRows(api, z.id, "httpRequestsAdaptiveGroups", "{ count dimensions { botManagementDecision } }", range, {
+					extraFilter: 'requestSource: "eyeball"',
+					limit: 100,
+				}),
+			]);
 			const requests = total(r.rows, "sum.requests");
+			// Zones without Bot Management can't read the field; show "—" for them instead of an error.
+			const noBm = b.errors.some((e) => /does not have access to the field/i.test(e));
+			const bot = Object.fromEntries(BOT_CLASSES.map(([k]) => [k, noBm ? null : 0])) as Record<BotClass, number | null>;
+			let scored = 0;
+			if (!noBm) {
+				for (const row of b.rows) {
+					scored += Number(row.count ?? 0);
+					const k = (row.dimensions as Row | undefined)?.botManagementDecision as BotClass;
+					if (k in bot) bot[k] = (bot[k] ?? 0) + Number(row.count ?? 0);
+				}
+			}
 			const threats = total(r.rows, "sum.threats");
 			return {
 				zone: z,
@@ -77,13 +102,25 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 				cachedBytes: total(r.rows, "sum.cachedBytes"),
 				threats,
 				good: requests - threats,
+				bot,
+				scored,
+				noBm,
 				errors: r.errors.map((e) => `${z.name}: ${e}`),
+				botErrors: noBm ? [] : b.errors,
 			};
 		}),
 	);
 	const sum = (k: "requests" | "bytes" | "cachedRequests" | "cachedBytes" | "threats" | "good") =>
 		perZone.reduce((acc, z) => acc + z[k], 0);
+	const botSum = (k: BotClass) => {
+		const bm = perZone.filter((z) => !z.noBm);
+		return bm.length ? bm.reduce((acc, z) => acc + (z.bot[k] ?? 0), 0) : null;
+	};
+	const botTotal = perZone.reduce((acc, z) => acc + z.scored, 0);
 	const errors = perZone.flatMap((z) => z.errors);
+	// Retention gaps are the same for every zone: show them once, as a note.
+	const botPartial = [...new Set(perZone.flatMap((z) => z.botErrors.filter((e) => e.startsWith("Partial:"))))];
+	const botErrors = perZone.flatMap((z) => z.botErrors.filter((e) => !e.startsWith("Partial:")).map((e) => `${z.zone.name}: ${e}`));
 	const noZones = zones.length === 0 ? ["No zones match the zone filter."] : [];
 
 	const cdn: Section = {
@@ -129,34 +166,47 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 	const good: Section = {
 		id: "good-requests",
 		group: "Zones",
-		title: "Bot Management – good requests",
-		source: "httpRequests1dGroups (requests − threats)",
+		title: "Bot Management – traffic classes",
+		source: "httpRequestsAdaptiveGroups botManagementDecision (sampled); good requests from httpRequests1dGroups",
 		metrics: [
-			{ label: "Good requests", value: sum("good"), unit: "count" },
-			{ label: "Threats (blocked / challenged)", value: sum("threats"), unit: "count" },
-			{ label: "Good share", value: pct(sum("good"), sum("requests")), unit: "percent" },
+			...BOT_CLASSES.map(([k, label, hint]) => ({
+				label,
+				value: botSum(k),
+				unit: "count" as Unit,
+				hint: botTotal ? `${hint} · ${(((botSum(k) ?? 0) / botTotal) * 100).toFixed(1)}%` : hint,
+			})),
+			{ label: "Good requests", value: sum("good"), unit: "count", hint: "Requests − threats (exact)" },
 		],
 		tables: [
 			{
 				title: "Per zone",
 				columns: [
 					{ key: "zone", label: "Zone" },
+					...BOT_CLASSES.map(([k, label]) => ({ key: k, label, unit: "count" as Unit })),
 					{ key: "requests", label: "Total requests", unit: "count" },
 					{ key: "threats", label: "Threats", unit: "count" },
 					{ key: "good", label: "Good requests", unit: "count" },
-					{ key: "goodPct", label: "Good %", unit: "percent" },
 				],
 				rows: [
-					...perZone.map((z) => ({ zone: z.zone.name, zoneId: z.zone.id, requests: z.requests, threats: z.threats, good: z.good, goodPct: pct(z.good, z.requests) })),
-					{ zone: "Total", requests: sum("requests"), threats: sum("threats"), good: sum("good"), goodPct: pct(sum("good"), sum("requests")) },
+					...perZone.map((z) => ({ zone: z.zone.name, zoneId: z.zone.id, ...z.bot, requests: z.requests, threats: z.threats, good: z.good })),
+					{
+						zone: "Total",
+						...Object.fromEntries(BOT_CLASSES.map(([k]) => [k, botSum(k)])),
+						requests: sum("requests"),
+						threats: sum("threats"),
+						good: sum("good"),
+					},
 				],
 			},
 		],
 		notes: [
-			"Good requests = total requests minus requests Cloudflare counted as threats (blocked or challenged by a security feature). Exact counts, not sampled.",
+			"Traffic classes come from Bot Management's decision on visitor requests (sampled estimates): Automated = bot score 1, Likely automated = 2–29, Likely human = 30–99, Verified bot = known good bots. Shares are of all sampled visitor requests, including ones Bot Management didn't classify.",
+			"Good requests = total requests minus requests Cloudflare counted as threats (blocked or challenged). Exact counts, not sampled.",
+			...botPartial.map((e) => `Traffic classes — ${e.replace(/^Partial: /, "")}`),
+			...(perZone.some((z) => z.noBm) ? ["— = Bot Management isn't enabled on that zone."] : []),
 			...noZones,
 		],
-		errors,
+		errors: [...errors, ...botErrors],
 	};
 	return [cdn, good];
 }
