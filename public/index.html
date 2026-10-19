@@ -936,13 +936,12 @@
           ].map(kpiHtml).join("")}</div>
         </section>
         <section class="card">
-          <h3>Bot Management – traffic classes</h3><div class="src">botManagementDecision · sampled; good requests exact</div>
+          <h3>Bot Management – traffic classes</h3><div class="src">botManagementDecision · sampled</div>
           <div class="kpis">${[
             botClass("automated", "Automated", "Bot score 1"),
             botClass("likely_automated", "Likely automated", "Bot score 2–29"),
             botClass("likely_human", "Likely human", "Bot score 30–99"),
             botClass("verified_bot", "Verified bot", "Known good bots"),
-            { label: "Good requests", value: t.good, unit: "count", hint: "Requests − threats (exact)" },
           ].map(kpiHtml).join("")}</div>
         </section>
         <section class="card">

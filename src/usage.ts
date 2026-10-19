@@ -220,8 +220,6 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 					{ key: "bytes", label: "Data transfer", unit: "bytes" },
 					{ key: "cachedRequests", label: "Cached requests", unit: "count" },
 					{ key: "cachedBytes", label: "Cached bytes", unit: "bytes" },
-					{ key: "p95Requests", label: "Requests 95th pct", unit: "rps" },
-					{ key: "p95Bytes", label: "Data transfer 95th pct", unit: "bps" },
 				],
 				rows: [
 					...perZone.map((z) => ({
@@ -232,8 +230,6 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 						bytes: z.bytes,
 						cachedRequests: z.cachedRequests,
 						cachedBytes: z.cachedBytes,
-						p95Requests: p95Rps(z.fiveReqs),
-						p95Bytes: p95Bps(z.fiveBytes),
 					})),
 					{
 						zone: "Total",
@@ -242,14 +238,12 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 						bytes: sum("bytes"),
 						cachedRequests: sum("cachedRequests"),
 						cachedBytes: sum("cachedBytes"),
-						p95Requests: p95Rps(acctReqs),
-						p95Bytes: p95Bps(acctBytes),
 					},
 				],
 			},
 		],
 		notes: [
-			"95th percentile: visitor requests and bytes are totalled per 5-minute interval and converted to requests per second and bits per second; the top 5% of intervals are discarded and the highest remaining one is shown. Intervals with no traffic count as 0. The Total row is the 95th percentile of all zones added together, not the sum of each zone's figures. Sampled estimates.",
+			"95th percentile: visitor requests and bytes are totalled per 5-minute interval and converted to requests per second and bits per second; the top 5% of intervals are discarded and the highest remaining one is shown. Intervals with no traffic count as 0. Figures are for all zones added together. Sampled estimates.",
 			...p95Partial.map((e) => `95th percentile — ${e.replace(/^Partial: /, "")}`),
 			...noZones,
 		],
@@ -260,7 +254,7 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 		id: "good-requests",
 		group: "Zones",
 		title: "Bot Management – traffic classes",
-		source: "httpRequestsAdaptiveGroups botManagementDecision (sampled); good requests from httpRequests1dGroups",
+		source: "httpRequestsAdaptiveGroups botManagementDecision (sampled); good requests from httpRequests1dGroups (exact)",
 		metrics: [
 			...BOT_CLASSES.map(([k, label, hint]) => ({
 				label,
@@ -268,7 +262,6 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 				unit: "count" as Unit,
 				hint: botTotal ? `${hint} · ${(((botSum(k) ?? 0) / botTotal) * 100).toFixed(1)}%` : hint,
 			})),
-			{ label: "Good requests", value: sum("good"), unit: "count", hint: "Requests − threats (exact)" },
 		],
 		tables: [
 			{
