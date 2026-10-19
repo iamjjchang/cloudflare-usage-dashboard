@@ -254,7 +254,7 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 		id: "good-requests",
 		group: "Zones",
 		title: "Bot Management – traffic classes",
-		source: "httpRequestsAdaptiveGroups botManagementDecision (sampled); good requests from httpRequests1dGroups (exact)",
+		source: "httpRequestsAdaptiveGroups botManagementDecision (sampled); total requests from httpRequests1dGroups (exact)",
 		metrics: [
 			...BOT_CLASSES.map(([k, label, hint]) => ({
 				label,
@@ -270,24 +270,19 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 					{ key: "zone", label: "Zone" },
 					...BOT_CLASSES.map(([k, label]) => ({ key: k, label, unit: "count" as Unit })),
 					{ key: "requests", label: "Total requests", unit: "count" },
-					{ key: "threats", label: "Threats", unit: "count" },
-					{ key: "good", label: "Good requests", unit: "count" },
 				],
 				rows: [
-					...perZone.map((z) => ({ zone: z.zone.name, zoneId: z.zone.id, ...z.bot, requests: z.requests, threats: z.threats, good: z.good })),
+					...perZone.map((z) => ({ zone: z.zone.name, zoneId: z.zone.id, ...z.bot, requests: z.requests })),
 					{
 						zone: "Total",
 						...Object.fromEntries(BOT_CLASSES.map(([k]) => [k, botSum(k)])),
 						requests: sum("requests"),
-						threats: sum("threats"),
-						good: sum("good"),
 					},
 				],
 			},
 		],
 		notes: [
 			"Traffic classes come from Bot Management's decision on visitor requests (sampled estimates): Automated = bot score 1, Likely automated = 2–29, Likely human = 30–99, Verified bot = known good bots. Shares are of all sampled visitor requests, including ones Bot Management didn't classify.",
-			"Good requests = total requests minus requests Cloudflare counted as threats (blocked or challenged). Exact counts, not sampled.",
 			...botPartial.map((e) => `Traffic classes — ${e.replace(/^Partial: /, "")}`),
 			...(perZone.some((z) => z.noBm) ? ["— = Bot Management isn't enabled on that zone."] : []),
 			...noZones,
