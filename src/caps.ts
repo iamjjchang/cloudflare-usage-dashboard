@@ -288,6 +288,6 @@ function formatValue(v: number, unit: Unit): string {
 		const i = v > 0 ? Math.min(Math.floor(Math.log10(v) / 3), u.length - 1) : 0;
 		return `${nf.format(v / 10 ** (3 * i))} ${u[i]}`;
 	}
-	const suffix: Partial<Record<Unit, string>> = { ms: " ms", seconds: " s", gbSeconds: " GB-s", gibSeconds: " GiB-s", percent: "%", bps: " bps" };
+	const suffix: Partial<Record<Unit, string>> = { ms: " ms", seconds: " s", gbSeconds: " GB-s", gibSeconds: " GiB-s", percent: "%", bps: " bps", rps: " req/s" };
 	return `${nf.format(v)}${suffix[unit] ?? ""}`;
 }

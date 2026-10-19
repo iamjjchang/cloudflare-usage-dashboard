@@ -410,6 +410,7 @@
       case "gibSeconds": return `${nf2.format(v)} GiB-s`;
       case "count": return nf.format(Math.round(v));
       case "bps": return fmtBps(v);
+      case "rps": return `${nf2.format(v)} req/s`;
       default: return nf2.format(v);
     }
   }
