@@ -218,8 +218,6 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 					{ key: "plan", label: "Plan" },
 					{ key: "requests", label: "Requests", unit: "count" },
 					{ key: "bytes", label: "Data transfer", unit: "bytes" },
-					{ key: "cachedRequests", label: "Cached requests", unit: "count" },
-					{ key: "cachedBytes", label: "Cached bytes", unit: "bytes" },
 				],
 				rows: [
 					...perZone.map((z) => ({
@@ -228,16 +226,12 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 						plan: z.zone.plan,
 						requests: z.requests,
 						bytes: z.bytes,
-						cachedRequests: z.cachedRequests,
-						cachedBytes: z.cachedBytes,
 					})),
 					{
 						zone: "Total",
 						plan: "",
 						requests: sum("requests"),
 						bytes: sum("bytes"),
-						cachedRequests: sum("cachedRequests"),
-						cachedBytes: sum("cachedBytes"),
 					},
 				],
 			},
