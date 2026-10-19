@@ -131,7 +131,7 @@ async function handleUsage(_request: Request, url: URL, env: AppEnv, ctx: Execut
 	const api = await apiFor(env);
 	if (!api) return json({ error: "CF_API_TOKEN secret is not set" }, 500);
 
-	return cached(`usage-v3?from=${from}&to=${to}&zones=${zoneFilter}`, url, to, ctx, async () => {
+	return cached(`usage-v4?from=${from}&to=${to}&zones=${zoneFilter}`, url, to, ctx, async () => {
 		const allZones = await listZones(api);
 		const zones = zoneFilter === "all" ? allZones : allZones.filter((z) => z.enterprise);
 		const body: UsageResponse = {

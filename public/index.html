@@ -391,6 +391,13 @@
     if (s < 7200) return `${nf2.format(s / 60)} min`;
     return `${nf2.format(s / 3600)} h`;
   }
+  function fmtBps(v) {
+    const units = ["bps", "kbps", "Mbps", "Gbps", "Tbps"];
+    let i = 0;
+    while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+    return `${nf2.format(v)} ${units[i]}`;
+  }
+
   function fmt(v, unit) {
     if (v === null || v === undefined) return "—";
     if (typeof v === "string") return v;
@@ -402,6 +409,7 @@
       case "gbSeconds": return `${nf2.format(v)} GB-s`;
       case "gibSeconds": return `${nf2.format(v)} GiB-s`;
       case "count": return nf.format(Math.round(v));
+      case "bps": return fmtBps(v);
       default: return nf2.format(v);
     }
   }

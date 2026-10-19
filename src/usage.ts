@@ -3,7 +3,7 @@
 import { zoneConfigTotals } from "./zoneconfig";
 import { accountRows, isLastPage, rest, splitRange, zoneRows, type Api, type DateRange, type Row, type Zone } from "./cloudflare";
 
-export type Unit = "count" | "bytes" | "percent" | "ms" | "seconds" | "gbSeconds" | "gibSeconds";
+export type Unit = "count" | "bytes" | "percent" | "ms" | "seconds" | "gbSeconds" | "gibSeconds" | "bps";
 
 export interface Metric {
 	label: string;
@@ -63,6 +63,34 @@ export async function buildSections(api: Api, zones: Zone[], range: DateRange): 
 // ---------------------------------------------------------------------------
 // Zones: CDN requests, data transfer and Bot Management good requests
 
+/** Number of 5-minute slots in the range (up to now, from the retention start if data is partial). */
+function fiveMinuteSlots(range: DateRange, partial: string[]): number {
+	const kept = partial.map((e) => /keeps this data from (\d{4}-\d{2}-\d{2})/.exec(e)?.[1]).find(Boolean);
+	const from = Date.parse(`${kept && kept > range.from ? kept : range.from}T00:00:00Z`);
+	const to = Math.min(Date.parse(`${range.to}T00:00:00Z`) + 86_400_000, Date.now());
+	return Math.max(0, Math.floor((to - from) / 300_000));
+}
+
+/** Percentile of per-slot bandwidth in bits/s; slots with no row are 0. */
+function percentileBps(bytesBySlot: Map<string, number>, slots: number, p: number): number {
+	const n = Math.max(slots, bytesBySlot.size);
+	if (!n) return 0;
+	const values = [...bytesBySlot.values()].sort((a, b) => a - b);
+	const zeros = n - values.length;
+	const idx = Math.ceil(p * n) - 1 - zeros;
+	return idx < 0 ? 0 : (values[idx] * 8) / 300;
+}
+
+function fmtBps(v: number): string {
+	const units = ["bps", "kbps", "Mbps", "Gbps", "Tbps"];
+	let i = 0;
+	while (v >= 1000 && i < units.length - 1) {
+		v /= 1000;
+		i++;
+	}
+	return `${v.toFixed(v < 10 ? 2 : 1)} ${units[i]}`;
+}
+
 type BotClass = "automated" | "likely_automated" | "likely_human" | "verified_bot";
 const BOT_CLASSES: [BotClass, string, string][] = [
 	["automated", "Automated", "Bot score 1"],
@@ -74,13 +102,23 @@ const BOT_CLASSES: [BotClass, string, string][] = [
 async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Promise<Section[]> {
 	const perZone = await Promise.all(
 		zones.map(async (z) => {
-			const [r, b] = await Promise.all([
+			const [r, b, f] = await Promise.all([
 				zoneRows(api, z.id, "httpRequests1dGroups", "{ sum { requests bytes cachedRequests cachedBytes threats } }", range),
 				zoneRows(api, z.id, "httpRequestsAdaptiveGroups", "{ count dimensions { botManagementDecision } }", range, {
 					extraFilter: 'requestSource: "eyeball"',
 					limit: 100,
 				}),
+				// Visitor bytes per 5 minutes, for 95th-percentile bandwidth.
+				zoneRows(api, z.id, "httpRequestsAdaptiveGroups", "{ sum { edgeResponseBytes } dimensions { datetimeFiveMinutes } }", range, {
+					extraFilter: 'requestSource: "eyeball"',
+					maxDays: 7,
+				}),
 			]);
+			const fiveMin = new Map<string, number>();
+			for (const row of f.rows) {
+				const t = String((row.dimensions as Row | undefined)?.datetimeFiveMinutes ?? "");
+				fiveMin.set(t, (fiveMin.get(t) ?? 0) + Number((row.sum as Row | undefined)?.edgeResponseBytes ?? 0));
+			}
 			const requests = total(r.rows, "sum.requests");
 			// Zones without Bot Management can't read the field; show "—" for them instead of an error.
 			const noBm = b.errors.some((e) => /does not have access to the field/i.test(e));
@@ -107,6 +145,8 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 				noBm,
 				errors: r.errors.map((e) => `${z.name}: ${e}`),
 				botErrors: noBm ? [] : b.errors,
+				fiveMin,
+				p95Errors: f.errors,
 			};
 		}),
 	);
@@ -118,6 +158,16 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 	};
 	const botTotal = perZone.reduce((acc, z) => acc + z.scored, 0);
 	const errors = perZone.flatMap((z) => z.errors);
+
+	// 95th percentile: account-wide = sum of all zones per 5-minute slot.
+	const p95Partial = [...new Set(perZone.flatMap((z) => z.p95Errors.filter((e) => e.startsWith("Partial:"))))];
+	const p95Errors = perZone.flatMap((z) => z.p95Errors.filter((e) => !e.startsWith("Partial:")).map((e) => `${z.zone.name}: ${e}`));
+	const slots = fiveMinuteSlots(range, p95Partial);
+	const accountFive = new Map<string, number>();
+	for (const z of perZone) for (const [t, v] of z.fiveMin) accountFive.set(t, (accountFive.get(t) ?? 0) + v);
+	const p95 = (m: Map<string, number>) => percentileBps(m, slots, 0.95);
+	const peak = (m: Map<string, number>) => (m.size ? (Math.max(...m.values()) * 8) / 300 : 0);
+
 	// Retention gaps are the same for every zone: show them once, as a note.
 	const botPartial = [...new Set(perZone.flatMap((z) => z.botErrors.filter((e) => e.startsWith("Partial:"))))];
 	const botErrors = perZone.flatMap((z) => z.botErrors.filter((e) => !e.startsWith("Partial:")).map((e) => `${z.zone.name}: ${e}`));
@@ -127,12 +177,18 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 		id: "cdn",
 		group: "Zones",
 		title: "CDN requests & data transfer",
-		source: "httpRequests1dGroups",
+		source: "httpRequests1dGroups (exact); 95th percentile from httpRequestsAdaptiveGroups (sampled, 5-min)",
 		metrics: [
 			{ label: "CDN requests", value: sum("requests"), unit: "count" },
 			{ label: "CDN data transfer", value: sum("bytes"), unit: "bytes", hint: "Bytes sent from Cloudflare to visitors" },
 			{ label: "Requests served from cache", value: pct(sum("cachedRequests"), sum("requests")), unit: "percent" },
 			{ label: "Bytes served from cache", value: pct(sum("cachedBytes"), sum("bytes")), unit: "percent" },
+			{
+				label: "95th percentile bandwidth",
+				value: slots ? p95(accountFive) : null,
+				unit: "bps",
+				hint: `All zones combined · 5-min samples · peak ${fmtBps(peak(accountFive))}`,
+			},
 		],
 		tables: [
 			{
@@ -144,6 +200,7 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 					{ key: "bytes", label: "Data transfer", unit: "bytes" },
 					{ key: "cachedRequests", label: "Cached requests", unit: "count" },
 					{ key: "cachedBytes", label: "Cached bytes", unit: "bytes" },
+					{ key: "p95", label: "95th pct bandwidth", unit: "bps" },
 				],
 				rows: [
 					...perZone.map((z) => ({
@@ -154,13 +211,26 @@ async function cdnAndGoodRequests(api: Api, zones: Zone[], range: DateRange): Pr
 						bytes: z.bytes,
 						cachedRequests: z.cachedRequests,
 						cachedBytes: z.cachedBytes,
+						p95: slots ? p95(z.fiveMin) : null,
 					})),
-					{ zone: "Total", plan: "", requests: sum("requests"), bytes: sum("bytes"), cachedRequests: sum("cachedRequests"), cachedBytes: sum("cachedBytes") },
+					{
+						zone: "Total",
+						plan: "",
+						requests: sum("requests"),
+						bytes: sum("bytes"),
+						cachedRequests: sum("cachedRequests"),
+						cachedBytes: sum("cachedBytes"),
+						p95: slots ? p95(accountFive) : null,
+					},
 				],
 			},
 		],
-		notes: [...noZones],
-		errors,
+		notes: [
+			"95th percentile bandwidth: visitor bytes per 5-minute interval converted to bits per second; the top 5% of intervals are discarded and the highest remaining one is shown. Intervals with no traffic count as 0. The Total row is the 95th percentile of all zones added together, not the sum of each zone's figure. Sampled estimate.",
+			...p95Partial.map((e) => `95th percentile — ${e.replace(/^Partial: /, "")}`),
+			...noZones,
+		],
+		errors: [...errors, ...p95Errors],
 	};
 
 	const good: Section = {
